@@ -1,9 +1,16 @@
 import asyncio
 import concurrent.futures
 import logging
+import os
 import time
+import uuid
 from http import HTTPStatus
 from typing import Optional
+
+import requests
+from dotenv import load_dotenv
+
+from tools.auth_util import *
 
 from dashscope import ImageSynthesis
 from langchain_core.language_models import LLM
@@ -12,12 +19,100 @@ from openai import OpenAI
 import tools.tmpCache
 from tools.xyqStoryUtils import prompt
 
-DEEPSEEK_API_KEY = 'sk-a0d85443c71f45edad250a3a23804cf8'
+load_dotenv()
+
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
-DASHSCOPE_API_KEY = "sk-52550a064f8446c98083f4ca302d5087"
+MOONSHOT_API_KEY = os.getenv('MOONSHOT_API_KEY')
+MOONSHOT_BASE_URL = "https://api.moonshot.cn/v1"
+DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY')
 
 demoPrompt = "近景镜头，18岁的中国女孩，古代服饰，圆脸，正面看着镜头，民族优雅的服装，商业摄影，室外，电影级光照，半身特写，精致的淡妆，锐利的边缘。"
 
+# vivo蓝心模型相关配置
+BLUE_LM_APP_ID = '2025384457'
+BLUE_LM_API_KEY = 'jdjqtVSKvSznkEgM'
+BLUE_LM_URL = '/vivogpt/completions'
+BLUE_LM_DOMAIN = 'api-ai.vivo.com.cn'
+
+
+# 蓝心模型接口
+# def prompt_LLM(general_prompt: str, message_mode: bool = False) -> str:
+#     params = {
+#         'requestId': str(uuid.uuid4()),
+#     }
+#
+#     if message_mode:
+#         data = {
+#             'message': general_prompt,
+#             'model': 'vivo-BlueLM-TB-Pro',
+#             'sessionId': str(uuid.uuid4()),
+#             'extra': {
+#                 'temperature': 0.7
+#             }
+#         }
+#     else:
+#         data = {
+#             'prompt': general_prompt,
+#             'model': 'vivo-BlueLM-TB-Pro',
+#             'sessionId': str(uuid.uuid4()),
+#             'extra': {
+#                 'temperature': 0.7
+#             }
+#         }
+#     headers = gen_sign_headers(BLUE_LM_APP_ID, BLUE_LM_API_KEY, 'POST', BLUE_LM_URL, params)
+#     headers['Content-Type'] = 'application/json'
+#     url = 'https://{}{}'.format(BLUE_LM_DOMAIN, BLUE_LM_URL)
+#     response = requests.post(url, headers=headers, json=data, params=params)
+#
+#     if response.status_code != HTTPStatus.OK:
+#         print(response.status_code, response.text)
+#         return response.text
+#     else:
+#         res_obj = response.json()
+#         if res_obj['code'] == 0 and res_obj.get('data'):
+#             content = res_obj['data']['content']
+#             return content
+#         return ""
+
+
+# def prompt_LLM(general_prompt: str, message_mode: bool = False) -> str:
+#     """
+#     Post a single prompt to LLMs
+#     向大模型发送prompt
+#
+#     Args:
+#         general_prompt (string): any prompt
+#         message_mode (bool, optional): prompt message是否是正确的格式
+#
+#     Returns:
+#         str: the response content of the LLMs
+#     """
+#     client = OpenAI(
+#         api_key=DEEPSEEK_API_KEY,
+#         base_url=DEEPSEEK_BASE_URL
+#     )
+#
+#     if message_mode:
+#         response = client.chat.completions.create(
+#             model="deepseek-chat",
+#             messages=general_prompt,
+#             stream=False  # True if implemented
+#         )
+#     else:
+#         response = client.chat.completions.create(
+#             model="deepseek-chat",
+#             messages=[
+#                 # {"role": "system", "content": ""},
+#                 {"role": "user", "content": general_prompt}
+#             ],
+#             stream=False  # True if implemented
+#         )
+#
+#     print(response)
+#     response = response.choices[0].message.content
+#     print(response)
+#     return response
 
 def prompt_LLM(general_prompt: str, message_mode: bool = False) -> str:
     """
@@ -32,19 +127,19 @@ def prompt_LLM(general_prompt: str, message_mode: bool = False) -> str:
         str: the response content of the LLMs
     """
     client = OpenAI(
-        api_key=DEEPSEEK_API_KEY,
-        base_url=DEEPSEEK_BASE_URL
+        api_key=MOONSHOT_API_KEY,
+        base_url=MOONSHOT_BASE_URL
     )
 
     if message_mode:
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="moonshot-v1-32k",
             messages=general_prompt,
             stream=False  # True if implemented
         )
     else:
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="moonshot-v1-32k",
             messages=[
                 # {"role": "system", "content": ""},
                 {"role": "user", "content": general_prompt}
@@ -71,6 +166,24 @@ def create_story(question: str) -> str:
         str: the story created by LLMs
     """
     story_prompt = prompt.story_prompt(question)
+    story = prompt_LLM(story_prompt)
+
+    return story
+
+
+def create_story_red_ver(question: str) -> str:
+    """
+    Create a story through LLMs with the given question
+    创建完整的故事
+
+    Args:
+        question (str): the input question
+            for example: 创作一部名为《小象的善良之旅》的儿童故事。故事的主人公，小象总是刻意去帮助她的动物朋友们，尽管他们并不总是友善。
+
+    Returns:
+        str: the story created by LLMs
+    """
+    story_prompt = prompt.story_prompt_red_ver(question)
     story = prompt_LLM(story_prompt)
 
     return story
@@ -105,10 +218,10 @@ def split_story(story: str) -> str:
     """
     messages = [{
         "role": "user",
-        "content": "帮我分割一个故事，每一个部分以&结尾，至少分出3部分，每部分大约35个字"
+        "content": "帮我分割一个故事，每一个部分以&结尾，且不要有换行符，至少分出3部分，每部分大约35个字"
     }, {
         "role": "assistant",
-        "content": "给我你的故事，我将割一个故事，每一个部分以&结尾，至少分出3部分，每部分大约35个字"
+        "content": "给我你的故事，我将割一个故事，每一个部分以&结尾，且不要有换行符，至少分出3部分，每部分大约35个字"
     }, {
         "role": "user",
         "content": "在遥远的森林深处，有一个被茂密树木和五彩斑斓的花朵环绕的村庄，这个村庄叫做“和谐村”。村里的居民们和睦相处，生活平静而幸福。然而，村庄里流传着一个古老而神秘的传说，关于一个拥有神奇力量的宝石——“和谐之心”。故事的主人公是一个名叫艾拉的小女孩，艾拉有着一头金色的长发和明亮的蓝眼睛，她对世界充满了好奇。她的父母都是村里的医生，经常帮助村民治疗疾病。艾拉从小就梦想着成为像父母一样的人，为村庄带来帮助和快乐。一天，艾拉在森林里探险时，无意中听到了关于“和谐之心”的传说，据说这颗宝石拥有实现愿望的力量，但只有心怀善意的人才能够找到它。艾拉被这个传说深深吸引，她决定踏上寻找宝石的旅程。艾拉的旅程并不容易，森林里充满了未知的危险，她遇到了各种各样的困难。有一次，她差点被一只凶猛的野狼攻击，幸好一只勇敢的狐狸出现，帮助她摆脱了危险。艾拉感激地向狐狸道谢，并与它成为了朋友。在旅途中，艾拉遇到了一位智慧的老猫头鹰，猫头鹰告诉她，要找到“和谐之心”，她必须通过三个考验：勇气、智慧和爱心。艾拉铭记在心，继续她的旅程。第一个考验是勇气，艾拉必须穿过一片被称为“恐惧之谷”的地方，谷中充满了迷雾和奇怪的声音，让人不寒而栗。但艾拉鼓起勇气，坚定地走了过去，她发现，恐惧只是自己内心的幻象。第二个考验是智慧，艾拉来到了一个巨大的迷宫，迷宫的出口就是宝石的所在地。她仔细观察迷宫的布局，运用逻辑思维，最终找到了出口。最后一个考验是爱心，艾拉遇到了一个受伤的小鹿，它无法行走。艾拉没有犹豫，她停下来照顾小鹿，用自己的衣服为它包扎伤口。小鹿康复后，带领艾拉找到了隐藏在瀑布后的“和谐之心”。艾拉找到了“和谐之心”，她许下了一个愿望：希望村庄永远和平，所有的居民都能幸福安康。宝石发出了耀眼的光芒，然后化作一道光，飞向了天空，照亮了整个村庄。艾拉带着宝石的力量回到了村庄，她的经历激励了所有的村民，她的勇气、智慧和爱心成为了村庄的传奇。艾拉没有保留宝石的力量，而是选择将它分享给了每一个人。从此，和谐村变得更加和谐，村民们的生活更加幸福。艾拉成为了村庄的英雄，她的故事被传唱了很多年，而“和谐之心”的传说也永远地留在了人们的心中。"
@@ -160,6 +273,29 @@ def obtain_pic_LLM_prompt(fragment: str, question: Optional[str] = None) -> str:
     return LLM_prompt
 
 
+def obtain_pic_LLM_prompt_red_ver(fragment: str, question: Optional[str] = None) -> str:
+    """
+    Call the API to obtain the prompt with the given enriched fragment
+    根据故事片段生成文生图prompt
+
+    Args:
+        fragment (str): the extracted fragment that enriched by LLM
+        question (str, optional): the style needed. Defaults to None.
+
+    Returns:
+        str: the LLM generated picture prompt
+    """
+    demos = prompt.demo_pic_prompt()
+    if question is None:
+        prompt_question = prompt.pic_prompt_question_red_ver(fragment)
+    else:
+        prompt_question = prompt.pic_prompt_question_red_ver(fragment, question)
+
+    LLM_prompt = prompt_LLM(demos + prompt_question)
+
+    return LLM_prompt
+
+
 def extract_fragments(original_fragments: str) -> list[str]:
     """
     Extract the fragments
@@ -179,6 +315,25 @@ def extract_fragments(original_fragments: str) -> list[str]:
     return extracted_fragments_list
 
 
+def extract_fragments_red_ver(original_fragments: str) -> list[str]:
+    """
+    Extract the fragments
+    提取片段关键信息
+
+    Args:
+        original_fragments (str): the original fragments without splitting
+
+    Returns:
+        extracted_fragments (str): string format extracted fragments
+        extracted_fragments_list (list[str]): string list format extracted fragments
+    """
+    extract_prompt = prompt.extract_prompt_red_ver(original_fragments)
+    extracted_fragments = prompt_LLM(extract_prompt)
+    extracted_fragments_list = extracted_fragments.split("&")
+
+    return extracted_fragments_list
+
+
 def polish_fragment(extracted_fragment: str) -> str:
     """
     polish the fragment
@@ -191,6 +346,24 @@ def polish_fragment(extracted_fragment: str) -> str:
         str: fragment that have been polished
     """
     polish_prompt = prompt.polish_prompt(extracted_fragment)
+    polished_fragment = prompt_LLM(polish_prompt)
+    print(polished_fragment)
+
+    return polished_fragment
+
+
+def polish_fragment_red_ver(extracted_fragment: str) -> str:
+    """
+    polish the fragment
+    再次打磨并精简提取出的片段
+
+    Args:
+        extracted_fragment (str): fragment that have been extracted
+
+    Returns:
+        str: fragment that have been polished
+    """
+    polish_prompt = prompt.polish_prompt_red_ver(extracted_fragment)
     polished_fragment = prompt_LLM(polish_prompt)
     print(polished_fragment)
 
@@ -219,6 +392,28 @@ def enrich(original_fragment: str, story: str, index: str, flag: bool = False) -
     return enriched_fragment
 
 
+def enrich_red_ver(original_fragment: str, story: str, index: str, flag: bool = True) -> str:
+    """
+    Enrich a single original fragment
+    丰富一个给定的故事片段
+
+    Args:
+        original_fragment (str): the original fragment
+        story (str): the original story
+        index (int): the fragment number
+        flag (bool, optional): true when repeatedly receives unsuccessful, modifying the prompt. Defaults to False.
+
+    Returns:
+        str: the enriched fragment
+    """
+    enrich_prompt = prompt.enrich_fragment_prompt_red_ver(fragment=original_fragment, story=story, flag=flag)
+    print(f"\n{enrich_prompt}   \nindex = {index}   enriching---------------------------------")
+    enriched_fragment = enrich_fragment(enrich_prompt)
+    print(f"\n{enriched_fragment}   \nindex = {index}   enriched-------------------------------")
+
+    return enriched_fragment
+
+
 def obtain_pic_prompt(enriched_fragment: str, index: int) -> str:
     """
     Obtain a txt_to_img prompt based on the given fragment by calling API and concatenate it with consistent style
@@ -240,10 +435,32 @@ def obtain_pic_prompt(enriched_fragment: str, index: int) -> str:
     return pic_prompt
 
 
+def obtain_pic_prompt_red_ver(enriched_fragment: str, index: int) -> str:
+    """
+    Obtain a txt_to_img prompt based on the given fragment by calling API and concatenate it with consistent style
+    生成最终的用于生成图片的prompt
+
+    Args:
+        enriched_fragment (str): an enriched fragment
+        index (int): the fragment number
+
+    Returns:
+        string: the corresponding txt_to_img prompt
+    """
+    print(f"\nindex = {index} obtaining pic prompt-------------------------------------")
+    pic_LLM_prompt = obtain_pic_LLM_prompt_red_ver(enriched_fragment)
+    print(f"\nindex = {index}   LLM_prompt---------------------------------------------\n{pic_LLM_prompt}")
+    pic_prompt = prompt.pic_prompt_red_ver(pic_LLM_prompt)
+    print(f"\nindex = {index}   pic_prompt---------------------------------------------\n{pic_prompt}")
+
+    return pic_prompt
+
+
 async def create_async_task(prompt=demoPrompt):
     parameters = {
         "api_key": DASHSCOPE_API_KEY,
-        "model": ImageSynthesis.Models.wanx_v1,
+        # "model": ImageSynthesis.Models.wanx_v1,
+        "model": "wanx2.1-t2i-turbo",
         "prompt": prompt,
         "n": 1,
         "style": '<watercolor>',
@@ -302,7 +519,8 @@ async def draw_cover(title: str, story: str, style='水彩风格') -> tuple:
     2. 根据主要人物，情节和风格生成midjourney形式的提示词
     3. 完整故事在<完整故事>处给出，标题<标题>处给出
     4. 请不要为角色命名
-    5. 使用{style}
+    5. 请不要使用会触发审核机制的文字描述，避免使用政治敏感词汇！
+    6. 使用{style}
     <完整故事>: {story}
     <标题> : {title}
     """
@@ -506,6 +724,28 @@ def enrich_and_draw(extracted_fragments: list[str], story: str):
                                        range(len(enriched_fragments))))
     pic_urls = asyncio.run(draw_image_list(pic_prompts))
     return enriched_fragments, pic_urls
+
+
+def enrich_and_draw_red_ver(extracted_fragments: list[str], story: str):
+    """
+    Encapsulate enriching the drawing function for multi-threading
+    并发执行对故事片段的丰富，并进行绘制
+
+    Args:
+        extracted_fragments (list[str]): extracted fragments
+        story (str): original story
+
+    Returns:
+        tuple: (pic_url, fragment number)
+    """
+    enriched_fragments = list(threading_query(enrich_red_ver, extracted_fragments,
+                                              [story for _ in range(len(extracted_fragments))],
+                                              range(len(extracted_fragments))))
+    pic_prompts = list(threading_query(obtain_pic_prompt_red_ver, enriched_fragments,
+                                       range(len(enriched_fragments))))
+    pic_urls = asyncio.run(draw_image_list(pic_prompts))
+    # return enriched_fragments, pic_urls
+    return extracted_fragments, pic_urls
 
 
 def enrich_and_draw_async(extracted_fragments: list[str], story: str, storyId: str):
@@ -737,7 +977,7 @@ def workflow(outline: str, judge: bool = False):
         return [outline, story, pic_prompts, polished_fragments, pic_urls], True
 
     except Exception as e:
-        print(e)
+        print("Workflow Error:",e)
         return [], False
 
 
@@ -830,6 +1070,45 @@ def async_workflow_process(res, storyId, judge: bool = False):
     except Exception as e:
         print(e)
         return [], False
+
+
+def workflow_red_ver(outline: str, judge: bool = False):
+    try:
+        # 故事生成
+        story = create_story_red_ver(outline)
+        # 故事分段
+        original_fragments = split_story(story)
+        print(original_fragments)
+        # 故事提炼
+        extracted_fragments_list = extract_fragments_red_ver(original_fragments)
+        # print(extracted_fragments_list)
+        # 封面绘制
+        cover_pic_prompt, cover_url = asyncio.run(draw_cover(original_fragments, story, "油画风格"))
+        # 创建列表用于保存绘图prompt和url
+        pic_prompts = [cover_pic_prompt]
+        pic_urls = [cover_url]
+        # 并发执行故事分段润色 此处放弃润色
+        # polished_results = list(threading_query(polish_fragment_red_ver, extracted_fragments_list[1:]))  # 提取后片段的第一个元素是标题，无需润色
+        # polished_fragments = extracted_fragments_list[0:1] + polished_results
+        polished_fragments = extracted_fragments_list
+        print(polished_fragments)
+        # 内容图片绘制
+        if judge:
+            # TODO : draw with judgement
+            return False
+        else:
+            results = enrich_and_draw_red_ver(extracted_fragments_list[1:], story)
+        pic_prompts = pic_prompts + results[0]
+        sorted_pic_urls = sorted(results[1], key=lambda x: x[1])
+        for pic_url in sorted_pic_urls:
+            pic_urls.append(pic_url[0])
+        print([outline, story, pic_prompts, polished_fragments, pic_urls])
+        return [outline, story, pic_prompts, polished_fragments, pic_urls], True
+
+    except Exception as e:
+        print("Workflow Error:",e)
+        return [], False
+
 
 
 def modify_flow(outline: str, story: str, requirement: str, judge: bool = False):
